@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>おうちストック管理</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #F7F4EF; font-family: 'Hiragino Sans', 'Noto Sans JP', sans-serif; }
+    select { appearance: none; -webkit-appearance: none; }
+    button:active { opacity: 0.7; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const MONTH_NAMES = ["1月","2月","3月","4月","5月","6月","7月","8月","9月","10月","11月","12月"];
+    const WEEK_LABELS = ["第1週","第2週","第3週","第4週","第5週"];
+
+    const INITIAL_ITEMS = [
+      { id:1, name:"トイレットペーパー",     icon:"🧻", unit:"袋", minStock:1, maxStock:4  },
+      { id:2, name:"パックご飯",             icon:"🍚", unit:"個", minStock:3, maxStock:10 },
+      { id:3, name:"フリーズドライ味噌汁",   icon:"🍜", unit:"袋", minStock:3, maxStock:10 },
+      { id:4, name:"洗濯洗剤",               icon:"🫧", unit:"個", minStock:1, maxStock:3  },
+      { id:5, name:"ハンドソープ詰め替え",   icon:"🧴", unit:"個", minStock:1, maxStock:3  },
+      { id:6, name:"食器洗い洗剤詰め替え",   icon:"🍽️", unit:"個", minStock:1, maxStock:3  },
+    ];
+
+    function mwLabel(mw) {
+      if (!mw || !mw.month || !mw.week) return null;
+      return `${MONTH_NAMES[mw.month-1]}${WEEK_LABELS[mw.week-1]}`;
+    }
+
+    function addOneWeek(mw) {
+      if (!mw || !mw.month || !mw.week) return null;
+      const d = new Date(new Date().getFullYear(), mw.month - 1, 1 + (mw.week - 1) * 7);
+      d.setDate(d.getDate() + 7);
+      return { month: d.getMonth() + 1, week: Math.min(Math.ceil(d.getDate() / 7), 5) };
+    }
+
+    function getCurrentMW() {
+      const t = new Date();
+      return { month: t.getMonth() + 1, week: Math.min(Math.ceil(t.getDate() / 7), 5) };
+    }
+
+    function getThursdays(n) {
+      const today = new Date();
+      const diff = (4 - today.getDay() + 7) % 7 || 7;
+      return Array.from({ length: n }, (_, i) => {
+        const d = new Date(today);
+        d.setDate(today.getDate() + diff + i * 7);
+        return d;
+      });
+    }
+
+    function formatDate(iso) {
+      if (!iso) return "—";
+      const d = new Date(iso);
+      return `${MONTH_NAMES[d.getMonth()]}${d.getDate()}日`;
+    }
+
+    function weekLabel(d) {
+      return `${MONTH_NAMES[d.getMonth()]}${WEEK_LABELS[Math.min(Math.ceil(d.getDate()/7)-1, 4)]}`;
+    }
+
+    function calcAvgDays(item) {
+      const rs = (item.history||[]).filter(h=>h.type==="restock").sort((a,b)=>new Date(a.date)-new Date(b.date));
+      if (rs.length < 2) return null;
+      const diffs = [];
+      for (let i=1;i<rs.length;i++) diffs.push((new Date(rs[i].date)-new Date(rs[i-1].date))/86400000);
+      return Math.round(diffs.reduce((a,b)=>a+b,0)/diffs.length);
+    }
+
+    function WeekPicker({ label, value, onChange }) {
+      const cur = getCurrentMW();
+      return (
+        <div style={{ marginBottom:13 }}>
+          <div style={{ fontSize:12, color:"#555", fontWeight:600, marginBottom:5 }}>{label}</div>
+          <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+            <select
+              value={value ? value.month : ""}
+              onChange={e => {
+                const month = Number(e.target.value);
+                if (!month) { onChange(null); return; }
+                onChange({ month, week: value ? value.week : 1 });
+              }}
+              style={{ flex:1, padding:"8px 10px", borderRadius:8, border:"1.5px solid #E0DDD8", fontSize:13, background:"#F7F4EF", color:"#2C2A26" }}
+            >
+              <option value="">— 月 —</option>
+              {MONTH_NAMES.map((m,i) => <option key={i} value={i+1}>{m}</option>)}
+            </select>
+            <select
+              value={value ? value.week : ""}
+              onChange={e => {
+                const week = Number(e.target.value);
+                if (!week) { onChange(null); return; }
+                onChange({ month: value ? value.month : cur.month, week });
+              }}
+              style={{ flex:1, padding:"8px 10px", borderRadius:8, border:"1.5px solid #E0DDD8", fontSize:13, background:"#F7F4EF", color:"#2C2A26" }}
+            >
+              <option value="">— 週 —</option>
+              {WEEK_LABELS.map((w,i) => <option key={i} value={i+1}>{w}</option>)}
+            </select>
+            {value && (
+              <button onClick={() => onChange(null)} style={{ padding:"8px 10px", borderRadius:8, border:"none", background:"#EEE", color:"#999", fontSize:12, cursor:"pointer" }}>✕</button>
+            )}
+          </div>
+          {value && <div style={{ fontSize:11, color:"#D4A853", marginTop:3 }}>→ {mwLabel(value)}</div>}
+        </div>
+      );
+    }
+
+    function App() {
+      const [items, setItems] = useState(() => {
+        try {
+          const saved = localStorage.getItem("coop-stock-v2");
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            return INITIAL_ITEMS.map(init => {
+              const found = parsed.find(p => p.id === init.id);
+              return found ? { ...init, ...found } : { ...init, stock: init.maxStock, history: [], ordered: false };
+            });
+          }
+        } catch {}
+        return INITIAL_ITEMS.map(i => ({ ...i, stock: i.maxStock, history: [], ordered: false }));
+      });
+
+      const [wishlist, setWishlist] = useState(() => {
+        try { return JSON.parse(localStorage.getItem("coop-wishlist") || "[]"); } catch { return []; }
+      });
+
+      const [view, setView]   = useState("stock");
+      const [modal, setModal] = useState(null);
+      const [toast, setToast] = useState(null);
+      const [newWish, setNewWish] = useState("");
+      const inputRef = useRef(null);
+
+      useEffect(() => { localStorage.setItem("coop-stock-v2",  JSON.stringify(items));   }, [items]);
+      useEffect(() => { localStorage.setItem("coop-wishlist", JSON.stringify(wishlist)); }, [wishlist]);
+
+      const showToast = msg => { setToast(msg); setTimeout(() => setToast(null), 2000); };
+
+      const updateStock = (id, delta) =>
+        setItems(prev => prev.map(it => it.id !== id ? it : { ...it, stock: Math.max(0, (it.stock||0) + delta) }));
+
+      const recordUse = id => {
+        setItems(prev => prev.map(it => {
+          if (it.id !== id) return it;
+          const stock = Math.max(0, (it.stock||0) - 1);
+          return { ...it, stock, history: [...(it.history||[]), { type:"use", date: new Date().toISOString(), count: stock }] };
+        }));
+        showToast("使用を記録しました");
+        setModal(null);
+      };
+
+      const recordRestock = (id, count) => {
+        const unit = items.find(i=>i.id===id)?.unit || "個";
+        setItems(prev => prev.map(it => {
+          if (it.id !== id) return it;
+          const stock = (it.stock||0) + count;
+          return { ...it, stock, history: [...(it.history||[]), { type:"restock", date: new Date().toISOString(), count, added: count }], ordered: false, confirmed: false, lastRestocked: new Date().toISOString() };
+        }));
+        showToast(`${count}${unit}補充しました`);
+        setModal(null);
+      };
+
+      // 注文候補トグル（在庫カードのボタン）
+      const toggleOrdered = id =>
+        setItems(prev => prev.map(it => it.id !== id ? it : { ...it, ordered: !it.ordered }));
+
+      // 「注文した」ボタン → confirmed状態に
+      const confirmOrder = id => {
+        setItems(prev => prev.map(it => it.id !== id ? it : { ...it, confirmed: true, ordered: false }));
+        setModal(id); // モーダルを開いて週設定できるように
+      };
+
+      const updateItemWeek = (id, key, mw) =>
+        setItems(prev => prev.map(it => {
+          if (it.id !== id) return it;
+          const patch = { [key]: mw };
+          if (key === "orderWeek") patch.deliveryWeek = mw ? addOneWeek(mw) : null;
+          return { ...it, ...patch };
+        }));
+
+      const addWish = () => {
+        const text = newWish.trim();
+        if (!text) return;
+        setWishlist(prev => [...prev, { id: Date.now(), text, done: false }]);
+        setNewWish("");
+        inputRef.current?.focus();
+      };
+
+      const toggleWish = id => setWishlist(prev => prev.map(w => w.id !== id ? w : { ...w, done: !w.done }));
+      const deleteWish = id => setWishlist(prev => prev.filter(w => w.id !== id));
+
+      // 在庫少ない or 手動で注文候補に追加したもの（まだ注文してない）
+      const needsOrder   = items.filter(i => ((i.stock||0) <= i.minStock || i.ordered) && !i.confirmed);
+      const orderedItems = items.filter(i => i.confirmed);
+      const thursdays    = getThursdays(4);
+      const modalItem    = modal ? items.find(i => i.id === modal) : null;
+      const wishPending  = wishlist.filter(w => !w.done).length;
+
+      const tabs = [
+        { key:"stock",    label:"在庫" },
+        { key:"order",    label:"注文",     badge: needsOrder.length + orderedItems.length },
+        { key:"wishlist", label:"欲しいもの", badge: wishPending },
+        { key:"history",  label:"履歴" },
+      ];
+
+      return (
+        <div style={{ minHeight:"100vh", background:"#F7F4EF", color:"#2C2A26", maxWidth:480, margin:"0 auto" }}>
+
+          {/* Header */}
+          <div style={{ background:"#2C2A26", color:"#F7F4EF", padding:"20px 18px 0", position:"sticky", top:0, zIndex:10 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+              <div>
+                <div style={{ fontSize:10, letterSpacing:3, opacity:0.4, marginBottom:3 }}>ROLLING STOCK</div>
+                <div style={{ fontSize:20, fontWeight:700 }}>おうちストック管理</div>
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontSize:10, opacity:0.4, marginBottom:2 }}>次回コープ受取</div>
+                <div style={{ fontSize:13, fontWeight:600, color:"#D4A853" }}>{weekLabel(thursdays[0])} 木曜</div>
+              </div>
+            </div>
+            <div style={{ display:"flex", gap:2, marginTop:14 }}>
+              {tabs.map(({ key, label, badge }) => (
+                <button key={key} onClick={() => setView(key)} style={{
+                  flex:1, padding:"8px 2px",
+                  background: view===key ? "#F7F4EF" : "transparent",
+                  color: view===key ? "#2C2A26" : "rgba(247,244,239,0.5)",
+                  border:"none", borderRadius:"6px 6px 0 0",
+                  fontSize:11, fontWeight: view===key ? 700 : 400, cursor:"pointer",
+                }}>
+                  {label}
+                  {badge > 0 && <span style={{ display:"inline-block", background:"#E05A3A", color:"#fff", borderRadius:10, fontSize:9, padding:"1px 4px", marginLeft:3, fontWeight:700 }}>{badge}</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ padding:"14px 14px 100px" }}>
+
+            {/* ── 在庫 ── */}
+            {view === "stock" && items.map(item => {
+              const stock = item.stock ?? item.maxStock;
+              const pct   = Math.min(1, stock / item.maxStock);
+              const low   = stock <= item.minStock || item.ordered || item.confirmed;
+              const avg   = calcAvgDays(item);
+              return (
+                <div key={item.id} onClick={() => setModal(item.id)} style={{
+                  background:"#fff", borderRadius:14, padding:"14px", marginBottom:10, cursor:"pointer",
+                  border: low ? "2px solid #E05A3A" : "2px solid transparent",
+                  boxShadow:"0 1px 4px rgba(44,42,38,0.07)",
+                }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+                    <div style={{ display:"flex", alignItems:"flex-start", gap:10 }}>
+                      <span style={{ fontSize:26, marginTop:2 }}>{item.icon}</span>
+                      <div>
+                        <div style={{ fontWeight:700, fontSize:14 }}>{item.name}</div>
+                        <div style={{ fontSize:11, color:"#999", marginTop:1 }}>
+                          最終補充: {formatDate(item.lastRestocked)}
+                          {avg && <span style={{ marginLeft:6 }}>· 平均{avg}日周期</span>}
+                        </div>
+                        <div style={{ display:"flex", flexWrap:"wrap", gap:"3px 6px", marginTop:5 }}>
+                          {item.orderWeek    && <span style={{ fontSize:10, background:"#D1ECF1", color:"#0C5460", borderRadius:4, padding:"2px 6px" }}>✏️ 注文: {mwLabel(item.orderWeek)}</span>}
+                          {item.deliveryWeek && <span style={{ fontSize:10, background:"#D4EDDA", color:"#155724", borderRadius:4, padding:"2px 6px" }}>📦 到着: {mwLabel(item.deliveryWeek)}</span>}
+                          {item.catalogWeek  && <span style={{ fontSize:10, background:"#FFF3CD", color:"#856404", borderRadius:4, padding:"2px 6px" }}>📋 掲載: {mwLabel(item.catalogWeek)}</span>}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ textAlign:"right", minWidth:44 }}>
+                      <div style={{ fontSize:28, fontWeight:800, color: low ? "#E05A3A" : "#2C2A26", lineHeight:1 }}>{stock}</div>
+                      <div style={{ fontSize:10, color:"#bbb" }}>{item.unit}</div>
+                    </div>
+                  </div>
+                  <div style={{ marginTop:10, height:4, background:"#EEE", borderRadius:10, overflow:"hidden" }}>
+                    <div style={{ height:"100%", width:`${pct*100}%`, background: low ? "#E05A3A" : pct>0.5 ? "#4CAF50" : "#D4A853", borderRadius:10, transition:"width 0.3s" }} />
+                  </div>
+                  <div style={{ marginTop:10, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                    <div style={{ fontSize:11 }}>
+                      {item.confirmed                             && <span style={{ color:"#4A90D9", fontWeight:600 }}>📦 注文済み（到着待ち）</span>}
+                      {!item.confirmed && item.ordered            && <span style={{ color:"#E05A3A", fontWeight:600 }}>📋 注文候補中</span>}
+                      {!item.confirmed && !item.ordered && stock <= item.minStock && <span style={{ color:"#E05A3A", fontWeight:600 }}>⚠ 残り少なし</span>}
+                    </div>
+                    {!item.confirmed && (
+                      <button
+                        onClick={e => { e.stopPropagation(); toggleOrdered(item.id); showToast(item.ordered ? "注文候補から外しました" : "注文候補に追加しました"); }}
+                        style={{
+                          padding:"5px 12px", borderRadius:20, border:"none", fontSize:11, fontWeight:700, cursor:"pointer",
+                          background: item.ordered ? "#FFF0EC" : "#F0EDE8",
+                          color:      item.ordered ? "#E05A3A" : "#888",
+                        }}
+                      >
+                        {item.ordered ? "✓ 候補中 (タップで解除)" : "+ 注文候補に追加"}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* ── 注文リスト ── */}
+            {view === "order" && (
+              <div>
+                <div style={{ background:"#fff", borderRadius:12, padding:"12px 14px", marginBottom:14, fontSize:12 }}>
+                  <div style={{ fontWeight:700, marginBottom:8, color:"#888", letterSpacing:1, fontSize:11 }}>今後の受取予定（木曜）</div>
+                  {thursdays.map((d,i) => (
+                    <div key={i} style={{ display:"flex", justifyContent:"space-between", padding:"4px 0", borderBottom: i<3 ? "1px solid #F0EDE8":"none", fontSize:13 }}>
+                      <span>{weekLabel(d)} 木曜</span>
+                      <span style={{ color:"#aaa" }}>{d.getMonth()+1}/{d.getDate()}</span>
+                    </div>
+                  ))}
+                </div>
+
+                {needsOrder.length === 0 && orderedItems.length === 0 && (
+                  <div style={{ textAlign:"center", padding:"50px 0", color:"#aaa" }}>
+                    <div style={{ fontSize:36 }}>✓</div>
+                    <div style={{ marginTop:8 }}>注文が必要なものはありません</div>
+                  </div>
+                )}
+
+                {needsOrder.length > 0 && (
+                  <div style={{ marginBottom:18 }}>
+                    <div style={{ fontSize:11, fontWeight:700, letterSpacing:2, color:"#E05A3A", marginBottom:8 }}>要注文 / 注文候補</div>
+                    {needsOrder.map(item => (
+                      <div key={item.id} style={{ background:"#fff", borderRadius:12, padding:"13px 14px", marginBottom:8, display:"flex", alignItems:"center", justifyContent:"space-between", border:"1.5px solid #FFDDD5" }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                          <span style={{ fontSize:22 }}>{item.icon}</span>
+                          <div>
+                            <div style={{ fontWeight:600, fontSize:14 }}>{item.name}</div>
+                            <div style={{ fontSize:11, color:"#E05A3A" }}>残り {item.stock||0}{item.unit}</div>
+                            {item.orderWeek && <div style={{ fontSize:10, color:"#555", marginTop:2 }}>✏️ {mwLabel(item.orderWeek)} 注文 → 📦 {mwLabel(item.deliveryWeek)} 到着</div>}
+                          </div>
+                        </div>
+                        <button onClick={() => confirmOrder(item.id)} style={{ background:"#E05A3A", color:"#fff", border:"none", borderRadius:8, padding:"7px 12px", fontSize:12, fontWeight:600, cursor:"pointer" }}>注文した</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {orderedItems.length > 0 && (
+                  <div>
+                    <div style={{ fontSize:11, fontWeight:700, letterSpacing:2, color:"#4A90D9", marginBottom:8 }}>注文済み（到着待ち）</div>
+                    {orderedItems.map(item => (
+                      <div key={item.id} style={{ background:"#fff", borderRadius:12, padding:"13px 14px", marginBottom:8, display:"flex", alignItems:"center", justifyContent:"space-between", opacity:0.75 }}>
+                        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                          <span style={{ fontSize:22 }}>{item.icon}</span>
+                          <div>
+                            <div style={{ fontWeight:600, fontSize:14, textDecoration:"line-through" }}>{item.name}</div>
+                            {item.deliveryWeek && <div style={{ fontSize:10, color:"#155724", marginTop:2 }}>📦 {mwLabel(item.deliveryWeek)} 到着予定</div>}
+                          </div>
+                        </div>
+                        <button onClick={() => recordRestock(item.id, item.maxStock-(item.stock||0))} style={{ background:"#4A90D9", color:"#fff", border:"none", borderRadius:8, padding:"7px 12px", fontSize:12, fontWeight:600, cursor:"pointer" }}>届いた！</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── 欲しいもの ── */}
+            {view === "wishlist" && (
+              <div>
+                <div style={{ fontSize:12, color:"#888", marginBottom:12 }}>次にカタログに出たら頼みたいものを書いておきましょう</div>
+
+                <div style={{ display:"flex", gap:8, marginBottom:16 }}>
+                  <input
+                    ref={inputRef}
+                    value={newWish}
+                    onChange={e => setNewWish(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && addWish()}
+                    placeholder="例: ポテトチップス うすしお"
+                    style={{ flex:1, padding:"11px 14px", borderRadius:10, border:"1.5px solid #E0DDD8", fontSize:14, background:"#fff", color:"#2C2A26", outline:"none" }}
+                  />
+                  <button onClick={addWish} style={{ padding:"11px 16px", borderRadius:10, background:"#2C2A26", color:"#F7F4EF", border:"none", fontSize:14, fontWeight:700, cursor:"pointer" }}>追加</button>
+                </div>
+
+                {wishlist.filter(w => !w.done).map(w => (
+                  <div key={w.id} style={{ background:"#fff", borderRadius:12, padding:"13px 14px", marginBottom:8, display:"flex", alignItems:"center", gap:10, boxShadow:"0 1px 3px rgba(44,42,38,0.06)" }}>
+                    <button onClick={() => toggleWish(w.id)} style={{ width:24, height:24, borderRadius:12, border:"2px solid #D4A853", background:"transparent", cursor:"pointer", flexShrink:0 }} />
+                    <span style={{ flex:1, fontSize:14 }}>{w.text}</span>
+                    <button onClick={() => deleteWish(w.id)} style={{ background:"none", border:"none", color:"#ccc", fontSize:18, cursor:"pointer", lineHeight:1 }}>×</button>
+                  </div>
+                ))}
+
+                {wishlist.filter(w => w.done).length > 0 && (
+                  <div style={{ marginTop:8 }}>
+                    <div style={{ fontSize:11, fontWeight:700, letterSpacing:2, color:"#bbb", marginBottom:8 }}>注文済み</div>
+                    {wishlist.filter(w => w.done).map(w => (
+                      <div key={w.id} style={{ background:"#fff", borderRadius:12, padding:"13px 14px", marginBottom:8, display:"flex", alignItems:"center", gap:10, opacity:0.5 }}>
+                        <button onClick={() => toggleWish(w.id)} style={{ width:24, height:24, borderRadius:12, border:"none", background:"#4CAF50", cursor:"pointer", flexShrink:0, color:"#fff", fontSize:14, display:"flex", alignItems:"center", justifyContent:"center" }}>✓</button>
+                        <span style={{ flex:1, fontSize:14, textDecoration:"line-through" }}>{w.text}</span>
+                        <button onClick={() => deleteWish(w.id)} style={{ background:"none", border:"none", color:"#ccc", fontSize:18, cursor:"pointer", lineHeight:1 }}>×</button>
+                      </div>
+                    ))}
+                    <button onClick={() => setWishlist(prev => prev.filter(w => !w.done))} style={{ width:"100%", marginTop:4, padding:"10px", background:"transparent", border:"1.5px solid #EEE", borderRadius:10, color:"#bbb", fontSize:12, cursor:"pointer" }}>注文済みをすべて削除</button>
+                  </div>
+                )}
+
+                {wishlist.length === 0 && (
+                  <div style={{ textAlign:"center", padding:"50px 0", color:"#ccc" }}>
+                    <div style={{ fontSize:36 }}>📝</div>
+                    <div style={{ marginTop:8, fontSize:14 }}>欲しいものを追加してみましょう</div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── 履歴 ── */}
+            {view === "history" && (
+              <div>
+                {items.map(item => {
+                  const history = [...(item.history||[])].reverse().slice(0,6);
+                  if (!history.length) return null;
+                  return (
+                    <div key={item.id} style={{ background:"#fff", borderRadius:12, padding:"14px", marginBottom:10 }}>
+                      <div style={{ fontWeight:700, marginBottom:10, display:"flex", alignItems:"center", gap:8 }}>
+                        <span>{item.icon}</span>{item.name}
+                      </div>
+                      {history.map((h,i) => (
+                        <div key={i} style={{ display:"flex", justifyContent:"space-between", padding:"5px 0", borderBottom: i<history.length-1 ? "1px solid #F0EDE8":"none", fontSize:13 }}>
+                          <span style={{ color: h.type==="restock" ? "#4CAF50" : "#E05A3A" }}>{h.type==="restock" ? `+${h.added}${item.unit} 補充` : "使用"}</span>
+                          <span style={{ color:"#aaa" }}>{formatDate(h.date)}</span>
+                          <span style={{ fontWeight:600 }}>残 {h.count}{item.unit}</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
+                {items.every(i => !(i.history||[]).length) && (
+                  <div style={{ textAlign:"center", padding:"60px 0", color:"#ccc" }}>まだ履歴がありません</div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* ── モーダル ── */}
+          {modalItem && (
+            <div onClick={() => setModal(null)} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.5)", zIndex:100, display:"flex", alignItems:"flex-end", justifyContent:"center" }}>
+              <div onClick={e => e.stopPropagation()} style={{ background:"#fff", borderRadius:"20px 20px 0 0", padding:"22px 18px 36px", width:"100%", maxWidth:480, maxHeight:"90vh", overflowY:"auto" }}>
+
+                <div style={{ textAlign:"center", marginBottom:16 }}>
+                  <div style={{ fontSize:38 }}>{modalItem.icon}</div>
+                  <div style={{ fontWeight:700, fontSize:17, marginTop:4 }}>{modalItem.name}</div>
+                  <div style={{ fontSize:30, fontWeight:800, margin:"6px 0" }}>
+                    {modalItem.stock ?? modalItem.maxStock}
+                    <span style={{ fontSize:13, fontWeight:400, color:"#888", marginLeft:4 }}>{modalItem.unit}</span>
+                  </div>
+                </div>
+
+                <div style={{ marginBottom:14 }}>
+                  <div style={{ fontSize:11, color:"#aaa", textAlign:"center", marginBottom:8 }}>在庫数を直接変更</div>
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:14 }}>
+                    <button onClick={() => updateStock(modalItem.id, -1)} style={{ width:46, height:46, borderRadius:23, background:"#F0EDE8", border:"none", fontSize:22, cursor:"pointer" }}>−</button>
+                    <span style={{ fontSize:26, fontWeight:800, minWidth:36, textAlign:"center" }}>{modalItem.stock ?? modalItem.maxStock}</span>
+                    <button onClick={() => updateStock(modalItem.id, 1)}  style={{ width:46, height:46, borderRadius:23, background:"#F0EDE8", border:"none", fontSize:22, cursor:"pointer" }}>＋</button>
+                  </div>
+                </div>
+
+                <div style={{ display:"flex", gap:8, marginBottom:18 }}>
+                  <button onClick={() => recordUse(modalItem.id)} style={{ flex:1, padding:"13px", background:"#FFF0EC", border:"none", borderRadius:11, fontWeight:700, fontSize:13, cursor:"pointer", color:"#E05A3A" }}>1個使った</button>
+                  <button onClick={() => recordRestock(modalItem.id, modalItem.maxStock-(modalItem.stock||0))} style={{ flex:1, padding:"13px", background:"#2C2A26", border:"none", borderRadius:11, fontWeight:700, fontSize:13, cursor:"pointer", color:"#F7F4EF" }}>届いた！補充</button>
+                </div>
+
+                <div style={{ borderTop:"1px solid #F0EDE8", paddingTop:16 }}>
+                  <div style={{ fontSize:11, fontWeight:700, color:"#888", marginBottom:14, letterSpacing:1 }}>コープ注文スケジュール</div>
+
+                  <WeekPicker
+                    label="✏️ 注文週（注文書を出す週）"
+                    value={modalItem.orderWeek || null}
+                    onChange={mw => updateItemWeek(modalItem.id, "orderWeek", mw)}
+                  />
+                  <WeekPicker
+                    label="📦 到着週（注文週の1週後が自動セット）"
+                    value={modalItem.deliveryWeek || null}
+                    onChange={mw => updateItemWeek(modalItem.id, "deliveryWeek", mw)}
+                  />
+                  <WeekPicker
+                    label="📋 次回カタログ掲載週"
+                    value={modalItem.catalogWeek || null}
+                    onChange={mw => updateItemWeek(modalItem.id, "catalogWeek", mw)}
+                  />
+                </div>
+
+                <button onClick={() => setModal(null)} style={{ width:"100%", marginTop:10, padding:"12px", background:"transparent", border:"none", color:"#bbb", fontSize:13, cursor:"pointer" }}>閉じる</button>
+              </div>
+            </div>
+          )}
+
+          {toast && (
+            <div style={{ position:"fixed", bottom:72, left:"50%", transform:"translateX(-50%)", background:"#2C2A26", color:"#F7F4EF", padding:"10px 20px", borderRadius:20, fontSize:13, fontWeight:600, zIndex:200, pointerEvents:"none", whiteSpace:"nowrap" }}>
+              {toast}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
